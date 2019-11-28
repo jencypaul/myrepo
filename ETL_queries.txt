@@ -1,0 +1,62 @@
+
+1)Query to populate etl_mig_table_map		
+	SELECT 
+    'Postgres' source,
+   table_catalog table_catalog,
+    table_schema,
+    table_name,
+    'datamgmtpf'	target_db_nm,
+    '' target_schema_nm,
+    replace(replace(replace(table_name,'-','_'),':','_'),'.','_') target_table_nm
+FROM
+    information_schema.tables
+WHERE
+    table_catalog='adventureworks'
+    and table_schema IN ('humanresources')
+        AND table_type = 'BASE TABLE'
+ORDER BY table_catalog , table_name;
+
+
+2)Query to populate etl_mig_ingest_table_metadata
+select  'Postgres' source,
+    c.table_catalog table_catalog,
+    c.table_schema,
+    c.table_name,
+	c.column_name,
+	c.data_type,
+	case when c.is_nullable='NO' then 'N' when c.is_nullable='YES' then 'Y' else 'N' end null_ind,
+	c.ordinal_position,
+case when c.column_name='rowguid' then 'N' else 'Y' end as req_load 
+	case when b.column_name is not null then 'Y' else 'N' end as pk_ind,
+	null java_map_ind
+	from information_schema.columns c 
+ left outer join(select ccu.column_name,cc.table_name,ccu.table_schema,ccu.table_catalog from information_schema.constraint_column_usage ccu,
+information_schema.table_constraints cc
+where ccu.table_name=cc.table_name
+and ccu.table_schema=cc.table_schema
+and ccu.table_catalog=cc.table_catalog
+and cc.constraint_type='PRIMARY KEY'
+and cc.constraint_name=ccu.constraint_name
+	 ) as b																										  
+on  c.column_name=b.column_name
+ and c.table_name=b.table_name
+ and c.table_catalog=b.table_catalog
+ and c.table_schema=b.table_schema
+ where c.table_schema not in('pg_catalog','public')
+ and c.table_catalog='adventureworks'
+ and c.table_schema='humanresources'
+and c.table_name='employee'
+order by  c.table_catalog ,
+    c.table_schema,
+    c.table_name,
+	c.ordinal_position asc
+	
+	3) Query to concatenate column names
+	select a.source_nm,a.db_nm,a.schema_nm,a.table_nm,b.column_list from dmp.etl_mig_table_map a join
+(select source_nm,db_nm,schema_nm,table_nm, array_to_string(array_agg(column_nm),',') column_list 
+from dmp.etl_mig_ingest_table_metadata where req_load<>'N'
+group by source_nm,db_nm,schema_nm,table_nm)b
+on a.table_nm=b.table_nm
+and a.source_nm=b.source_nm
+and a.schema_nm=b.schema_nm
+and a.db_nm=b.db_nm;
